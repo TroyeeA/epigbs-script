@@ -1,0 +1,246 @@
+
+library(plyr)
+library(dplyr)
+library(reshape2)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(expss)
+library(missMDA)
+library(FactoMineR)
+library(factoextra)
+library(car)
+library(emmeans)
+
+library(DSS)
+require(bsseq)
+library("stats")
+library("parallel")
+library("DSS")
+library("limma")
+
+
+
+#====== Edition of Marc Script
+
+load("02.1_data.Rdata")
+da<-data.3.80
+da$N_NA<-count_row_if(NA, da[,4:dim(da)[2]]) # we add a column
+range(da$N_NA)
+quantile(da$N_NA)
+
+data<-select(filter(da, N_NA ==0), -N_NA)
+dim(data)
+
+### CHH
+total.CHH<-select(filter(data, context=="CHH"), -(ends_with("methylated")), -context)
+meth.CHH<-select(filter(data,context=="CHH"), -(ends_with("total")), -context)
+
+total.CHH<-melt(total.CHH, id=c("chr", "pos"))
+meth.CHH<-melt(meth.CHH, id=c("chr", "pos"))
+
+colnames(meth.CHH)<-c("chrom", "pos", "variable", "meth")
+colnames(total.CHH)<-c("chrom", "pos", "variable", "total")
+
+meth.CHH<-mutate(meth.CHH, sample= str_replace_all(variable, "_methylated", ""))
+total.CHH<-mutate(total.CHH, sample= str_replace_all(variable, "_total", ""))
+
+meth.CHH<- meth.CHH %>% arrange(chrom, pos, variable, sample) # sort rows
+total.CHH<- total.CHH %>% arrange(chrom, pos, variable, sample) # sort rows
+
+sum(meth.CHH$sampl==total.CHH$sample)==dim(meth.CHH)[1]
+
+head(meth.CHH)
+
+meth.CHH<-left_join(meth.CHH, total.CHH, by=c("chrom", "pos", "sample"))
+
+head(meth.CHH)
+meth.CHH$variable.x<-NULL
+meth.CHH$variable.y<-NULL
+
+head(meth.CHH)
+meth.CHH<-meth.CHH[, c("chrom", "pos", "sample", "meth", "total")]
+head(meth.CHH)
+
+curSample<-unique(meth.CHH$sample)
+meth.CHH$chrom <- as.numeric(meth.CHH$chrom)
+meth.CHH$pos <- as.numeric(meth.CHH$pos)
+
+forDSS.CHH <- list()
+temp<-c()
+
+for (curSample in unique(meth.CHH$sample)) {
+  temp <- filter(meth.CHH, sample == curSample)
+  tempTab <- data.frame(
+    chr = temp$chrom,
+    pos = temp$pos,
+    N = temp$total,
+    X = temp$meth,
+    stringsAsFactors = FALSE
+  )
+  forDSS.CHH[[curSample]] <- tempTab
+}
+
+head(forDSS.CHH[[1]])
+
+#meth<-separate(meth, sample, c("sample", "group"))
+
+myBS.CHH <- makeBSseqData(forDSS.CHH, names(forDSS.CHH)) ## take time?
+
+### CHG
+total.CHG<-select(filter(data, context=="CHG"), -(ends_with("methylated")), -context)
+meth.CHG<-select(filter(data,context=="CHG"), -(ends_with("total")), -context)
+
+total.CHG<-melt(total.CHG, id=c("chr", "pos"))
+meth.CHG<-melt(meth.CHG, id=c("chr", "pos"))
+
+colnames(meth.CHG)<-c("chrom", "pos", "variable", "meth")
+colnames(total.CHG)<-c("chrom", "pos", "variable", "total")
+
+meth.CHG<-mutate(meth.CHG, sample= str_replace_all(variable, "_methylated", ""))
+total.CHG<-mutate(total.CHG, sample= str_replace_all(variable, "_total", ""))
+
+meth.CHG<- meth.CHG %>% arrange(chrom, pos, variable, sample) # sort rows
+total.CHG<- total.CHG %>% arrange(chrom, pos, variable, sample) # sort rows
+
+sum(meth.CHG$sampl==total.CHG$sample)==dim(meth.CHG)[1]
+
+head(meth.CHG)
+
+meth.CHG<-left_join(meth.CHG, total.CHG, by=c("chrom", "pos", "sample"))
+
+head(meth.CHG)
+meth.CHG$variable.x<-NULL
+meth.CHG$variable.y<-NULL
+
+head(meth.CHG)
+meth.CHG<-meth.CHG[, c("chrom", "pos", "sample", "meth", "total")]
+head(meth.CHG)
+
+curSample<-unique(meth.CHG$sample)
+meth.CHG$chrom <- as.numeric(meth.CHG$chrom)
+meth.CHG$pos <- as.numeric(meth.CHG$pos)
+
+forDSS.CHG <- list()
+temp<-c()
+
+for (curSample in unique(meth.CHG$sample)) {
+  temp <- filter(meth.CHG, sample == curSample)
+  tempTab <- data.frame(
+    chr = temp$chrom,
+    pos = temp$pos,
+    N = temp$total,
+    X = temp$meth,
+    stringsAsFactors = FALSE
+  )
+  forDSS.CHG[[curSample]] <- tempTab
+}
+
+head(forDSS.CHG[[1]])
+
+#meth<-separate(meth, sample, c("sample", "group"))
+
+myBS.CHG <- makeBSseqData(forDSS.CHG, names(forDSS.CHG)) ## take time?
+
+myBS.CHG
+
+####--------------------------------------------
+###--------Make it for each context
+
+###-------------------------CG
+total.CG<-select(filter(data, context=="CG"), -(ends_with("methylated")), -context)
+meth.CG<-select(filter(data,context=="CG"), -(ends_with("total")), -context)
+
+total.CG<-melt(total.CG, id=c("chr", "pos"))
+meth.CG<-melt(meth.CG, id=c("chr", "pos"))
+
+colnames(meth.CG)<-c("chrom", "pos", "variable", "meth")
+colnames(total.CG)<-c("chrom", "pos", "variable", "total")
+
+meth.CG<-mutate(meth.CG, sample= str_replace_all(variable, "_methylated", ""))
+total.CG<-mutate(total.CG, sample= str_replace_all(variable, "_total", ""))
+
+meth.CG<- meth.CG %>% arrange(chrom, pos, variable, sample) # sort rows
+total.CG<- total.CG %>% arrange(chrom, pos, variable, sample) # sort rows
+
+sum(meth.CG$sampl==total.CG$sample)==dim(meth.CG)[1]
+
+head(meth.CG)
+
+meth.CG<-left_join(meth.CG, total.CG, by=c("chrom", "pos", "sample"))
+
+head(meth.CG)
+meth.CG$variable.x<-NULL
+meth.CG$variable.y<-NULL
+
+head(meth.CG)
+meth.CG<-meth.CG[, c("chrom", "pos", "sample", "meth", "total")]
+head(meth.CG)
+
+curSample<-unique(meth.CG$sample)
+meth.CG$chrom <- as.numeric(meth.CG$chrom)
+meth.CG$pos <- as.numeric(meth.CG$pos)
+forDSS.CG <- list()
+temp<-c()
+
+for (curSample in unique(meth.CG$sample)) {
+  temp <- filter(meth.CG, sample == curSample)
+  tempTab <- data.frame(
+    chr = temp$chrom,
+    pos = temp$pos,
+    N = temp$total,
+    X = temp$meth,
+    stringsAsFactors = FALSE
+  )
+  forDSS.CG[[curSample]] <- tempTab
+}
+
+head(forDSS.CG[[1]])
+
+
+
+myBS.CG <- makeBSseqData(forDSS.CG, names(forDSS.CG)) ## take time?
+myBS.CG
+
+meth.CHH$sep<-meth.CHH$sample
+meth.CHH<-separate(meth.CHH, sep, c("Acc", "group"))
+#meth.CHH$NO<-NULL
+
+
+
+
+####--------------------------------------------
+###--------Make it for each context
+
+myBS.CHH
+myBS.CHG
+myBS.CG
+
+#rm(forDSS.CHH); gc() #computational parameters
+
+####--------------  CHH  ------------------------
+
+sampleTab.CHH <- unique(meth.CHH[,c("Acc", "group")]); rownames(sampleTab.CHH) <- unique(meth.CHH$sample)
+sampleTab.CHH <- sampleTab.CHH[colnames(myBS.CHH), c("Acc", "group")]
+colnames(sampleTab.CHH) <- c("Acc", "Treat__") ### Armar de acuerdo a los grupos
+
+###----- Working! :) I need to change
+
+## define the contrasts
+formulaString <- "~0+Treat__"
+design <- model.matrix(formula(formulaString), data = sampleTab.CHH)
+myCont <- makeContrasts(
+  CvsT = Treat__Control-Treat__Shade,
+  levels = design)
+allContrasts <- colnames(myCont)
+
+## do all tests
+myFit <- DMLfit.multiFactor(myBS.CHH, sampleTab.CHH, formula(formulaString))
+out <- unique(meth.CHH[,c("chrom", "pos")])  ## adjust! remove chrNum, context
+colnames(out) <- c("chrom", "pos")
+rownames(out) <- paste0(out$chrom, '_', out$pos)
+for (cn in allContrasts) {
+  temp <- matrix(myCont[,cn], ncol = 1)
+  testRes <- DMLtest.multiFactor(myFit, Contrast = temp)
+  out[paste0(testRes$chr, "_", testRes$pos), paste0("FDR_", cn)] <- testRes$fdrs
+}

@@ -1,0 +1,125 @@
+###### ------ Remove bad samples -----------------------------------------------------------------------------------------
+###### Remove bad samples from main table and create a new object.
+
+bad.samples<- bad.samples %>% mutate(meth= str_replace_all(variable, "_total", "_methylated"))
+rm.samples.total<-as.character(bad.samples$variable)
+rm.samples.meth<-bad.samples$meth
+data.1<-select(data, -rm.samples.total, -rm.samples.meth)
+
+###### ------ CONTROL that we remove bad samples -----------------------------------------------------------------------------------------
+###### For the first line need a TRUE. Otherwise, game over :S
+###### Then, save the data
+
+
+dim(data.1)[2]==(dim(data)[2]-((dim(bad.samples)[1])*2))
+save(data.1, file="01.2_data.Rdata")  ## You can load this data with the following command: load("01.2_data.Rdata")
+
+###### ------ Control step -----------------------------------------------------------------------------------------
+
+control.01
+control.07<-dim(data.1)[1] # the same that control.01
+data.1.total<-select(data.1, -(ends_with("methylated")))
+nas.good.samples<-(sum(is.na(data.1.total))*100)/((dim(data.1.total)[1])*dim(data.1.total)[2]-4) # NAs% before 10X coverage reads
+
+
+###### ------ Filtering for low and high read coverage -----------------------------------------------------------------------------------------
+###### We're going to work with total reads for samples (all columns with _total)
+###### Then, we're going to pass from wide to stacked format to calculate quantiles for reads and samples called
+###### This is a iterative step, so we're going to do this two steps three times:
+###### -first to change all observations below 10 reads to NA;
+###### -second, to change all observations that are in the 99.99% of the distribution (high coverage)
+###### -third, we're going to see the final read and New samples called in data.
+
+###### ------ First step
+
+data.stacked.1.total<-melt(data.1.total, id=c("chr", "pos", "context", "samples_called"))
+quaBefore10X<-quantile(data.stacked.1.total$value, c(0.1,0.15,0.2,0.25,0.3,0.4,0.5,0.6,0.7,0.75,0.8,0.85,0.9, 0.95,0.96,0.97,0.98, 0.99, 0.991, 0.995, 0.998,0.999,0.9991, 0.9995, 0.9999, 1), na.rm=TRUE)
+quaBefore10X ## see reads distribution
+
+data.1.total[data.1.total<10]<- NA   ###----------- *change low coverage*
+
+###### ------ Second step
+
+data.stacked.1.total<-melt(data.1.total, id=c("chr", "pos", "context", "samples_called"))
+quaBeforeHigh<-quantile(data.stacked.1.total$value, c(0.1,0.15,0.2,0.25,0.3,0.4,0.5,0.6,0.7,0.75,0.8,0.85,0.9, 0.95,0.96,0.97,0.98, 0.99, 0.991, 0.995, 0.998,0.999,0.9991, 0.9995, 0.9999, 1), na.rm=TRUE) # to detect high coverage reads
+quaBeforeHigh
+quaBeforeHigh[25] ## check, it must to be 99.99%
+
+data.1.total[data.1.total>=quaBeforeHigh[25]]<- NA ###-----------  *change high coverage*
+
+###### ------ Third step
+
+data.stacked.1.total<-melt(data.1.total, id=c("chr", "pos", "context", "samples_called"))
+quaAfter10X<-quantile(data.stacked.1.total$value, c(0.1,0.15,0.2,0.25,0.3,0.4,0.5,0.6,0.7,0.75,0.8,0.85,0.9, 0.95,0.96,0.97,0.98, 0.99, 0.991, 0.995, 0.998,0.999,0.9991, 0.9995, 0.9999, 1), na.rm=TRUE)
+quaAfter10X
+
+data.1.total$New_Sample_called<-count_row_if(gt(0), data.1.total[,5:dim(data.1.total)[2]]) # calculate new samples called
+data.stacked.1.total<-melt(data.1.total, id=c("chr", "pos", "context", "samples_called", "New_Sample_called"))
+quaNewSamplesCalled<-quantile(data.stacked.1.total$New_Sample_called,c(0.1,0.15,0.2,0.25,0.3,0.4,0.5,0.6,0.7,0.75,0.8,0.85,0.9, 0.95,0.96,0.97,0.98, 0.99, 0.991, 0.995, 0.998,0.999,0.9991, 0.9995, 0.9999, 1), na.rm=TRUE)
+quaNewSamplesCalled  ## check
+
+
+###### ------ Main table: joint data_total with low and high coverage changed --------------------------------------------
+
+data.1.meth<-select(data.1, -(ends_with("total")))
+data.2<-left_join(data.1.total, data.1.meth, by=c("chr", "pos", "context", "samples_called"))
+
+###### ------ Control step ---------------------------------------------------------------------------------------------
+###### Check row numbers
+
+dim(data.1)[1]==dim(data.2)[1]
+
+###### ------Filtering for 80% of samples -------------------------------------------------------------------------------
+###### We're going to select C that are present in at least 80% of samples
+###### Then, save data
+
+samples.80<-round((length(unique(data.stacked.1.total$variable)))*0.8) ## You can change the threshold here
+data.3.80<-select(filter(data.2, New_Sample_called >=samples.80), -samples_called)
+range(data.3.80$New_Sample_called)# CONTROL: check if this make sense for the total number of samples
+quaNewSamplesCalled.80S<-quantile(data.3.80$New_Sample_called,c(0.1,0.15,0.2,0.25,0.3,0.4,0.5,0.6,0.7,0.75,0.8,0.85,0.9, 0.95,0.96,0.97,0.98, 0.99, 0.991, 0.995, 0.998,0.999,0.9991, 0.9995, 0.9999, 1), na.rm=TRUE)
+quaNewSamplesCalled.80S
+
+data.3.80$New_Sample_called<-NULL
+save(data.3.80, file="02.1_data.Rdata") ## load("02.1_data.Rdata")
+
+###### ------Report for filtering step -------------------------------------------------------------------------------
+###### We're going do some summary for C's and read coverage in the main table.
+###### Then, we're going to save it as .txt file
+
+data.3.total<-select(data.3.80, -(ends_with("methylated")))
+Cafter10X<-dim(data.3.80)[1] #
+nas.data<-(sum(is.na(data.3.total))*100)/((dim(data.3.total)[1])*dim(data.3.total)[2]-3)
+data.stacked.3.total<-melt(data.3.total, id=c("chr", "pos", "context"))
+quaData<-quantile(data.stacked.3.total$value, c(0.1,0.15,0.2,0.25,0.3,0.4,0.5,0.6,0.7,0.75,0.8,0.85,0.9,
+0.95,0.96,0.97,0.98, 0.99, 0.991, 0.995, 0.998,0.999,0.9991, 0.9995, 0.9999, 1), na.rm=TRUE)
+
+sink("01.2_Report: Filtering step")
+cat("####-------------From bed file-------------####\n")
+        cat("C's from bed file\n")
+            control.01
+cat("####-------------Before filtering by coverage-------------####\n")
+        cat("C's without bad samples\n")
+            control.07
+        cat("NAs without bad samples\n")
+            nas.good.samples
+        cat("Quantiles for read coverage before filter\n")
+            quaBefore10X
+cat("####-------------During filtering by coverage-------------####\n")
+        cat("Quantiles for read coverage before filtering\n")
+          quaBeforeHigh
+        cat("Quantiles for read coverage after 10X and high coverage (reads in the 99.99% bin)\n")
+          quaAfter10X
+        cat("Quantiles for New samples called\n")
+          quaNewSamplesCalled
+cat("####-------------After filtering by coverage and 80% of samples-------------####\n")
+        cat("Final quantiles for new samples called in Main filtered table\n")
+          quaNewSamplesCalled.80S
+        cat("NAs after 10X with 80% samples\n")
+            nas.data
+        cat("Quantiles for read coverage 10X with 80% samples\n")
+            quaData
+        cat("% Cs in data final\n")
+        (Cafter10X*100)/control.01
+        cat("Cs in data final\n")
+        Cafter10X
+sink()

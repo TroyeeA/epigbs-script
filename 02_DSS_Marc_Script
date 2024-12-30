@@ -1,0 +1,106 @@
+
+library(plyr)
+library(dplyr)
+library(reshape2)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(expss)
+library(missMDA)
+library(FactoMineR)
+library(factoextra)
+library(car)
+library(emmeans)
+library(DSS)
+require(bsseq)
+library("stats")
+library("parallel")
+library("DSS")
+library("limma")
+
+
+
+#====== Edition of Marc Script
+
+#dat<-load("02.1_data.Rdata")
+dat<-data.3.80[1:10,]
+data<-arrange(dat, chr, pos) # sort rows
+
+
+total<-select(data, -(ends_with("methylated")), -context)
+meth<-select(data, -(ends_with("total")), -context)
+total<-melt(total, id=c("chr", "pos"))
+meth<-melt(meth, id=c("chr", "pos"))
+sum(meth$chr==total$chr)==dim(meth)[1]
+
+
+colnames(meth)<-c("chrom", "pos", "variable", "meth")
+colnames(total)<-c("chrom", "pos", "variable", "total")
+meth$total<-total$total
+
+meth<- meth %>% mutate(sample= str_replace_all(variable, "_methylated", ""))
+meth$variable<-NULL
+meth<-meth[, c("chrom", "pos", "sample", "meth", "total")]
+
+
+curSample<-unique(meth$sample)
+meth$chr <- as.numeric(meth$chrom)
+forDSS <- list()
+temp<-c()
+
+for (curSample in unique(meth$sample)) {
+  temp <- filter(meth, sample == curSample)
+  tempTab <- data.frame(
+    chr = temp$chrom,
+    pos = temp$pos,
+    N = temp$total,
+    X = meth$meth,
+    stringsAsFactors = FALSE
+  )
+  forDSS[[curSample]] <- tempTab
+}
+
+head(forDSS[[1]])
+
+meth<-separate(meth, sample, c("sample", "group"))
+#----- Working!
+
+myBS <- makeBSseqData(forDSS, names(forDSS)) ## take time?
+rm(forDSS); gc()
+sampleTab <- unique(meth[,c("sample", "group")]); rownames(sampleTab) <- sampleTab$sample
+sampleTab <- sampleTab[colnames(myBS), c("sample", "group")]
+colnames(sampleTab) <- c("sample", "TS__")
+
+## define the contrasts
+formulaString <- "~0+TS__"
+design <- model.matrix(formula(formulaString), data = sampleTab)
+myCont <- makeContrasts(
+  PH_mix_vs_mon = (TS__mix_monoculture + TS__mix_mixture)/2 - (TS__mono_monoculture + TS__mono_mixture)/2,
+  PH_mix_vs_mon_in_AS_monoculture = TS__mix_monoculture - TS__mono_monoculture,
+  PH_mix_vs_mon_in_AS_mixture = TS__mix_mixture - TS__mono_mixture,
+  PH_mix_vs_none = (TS__mix_monoculture + TS__mix_mixture)/2 - (TS__none_monoculture + TS__none_mixture)/2,
+  PH_mix_vs_none_in_AS_monoculture = TS__mix_monoculture - TS__none_monoculture,
+  PH_mix_vs_none_in_AS_mixture = TS__mix_mixture - TS__none_mixture,
+  PH_mon_vs_none = (TS__mono_monoculture + TS__mono_mixture)/2 - (TS__none_monoculture + TS__none_mixture)/2,
+  PH_mon_vs_none_in_AS_monoculture = TS__mono_monoculture - TS__none_monoculture,
+  PH_mon_vs_none_in_AS_mixture = TS__mono_mixture - TS__none_mixture,
+  AS_mixture_vs_monoculture = (TS__none_mixture + TS__mono_mixture + TS__mix_mixture)/3 - (TS__none_monoculture + TS__mono_monoculture + TS__mix_monoculture)/3,
+  AS_mixture_vs_monoculture_in_PH_none = TS__none_mixture - TS__none_monoculture,
+  AS_mixture_vs_monoculture_in_PH_mon = TS__mono_mixture - TS__mono_monoculture,
+  AS_mixture_vs_monoculture_in_PH_mix = TS__mix_mixture - TS__mix_monoculture,
+  levels = design)
+allContrasts <- colnames(myCont)
+
+## do all tests
+myFit <- DMLfit.multiFactor(myBS, sampleTab, formula(formulaString))
+out <- unique(meth[,c("chrom", "chrNum", "pos", "ctxt")])
+colnames(out) <- c("chrom", "chrNum", "pos", "context")
+rownames(out) <- paste0(out$chrNum, '_', out$pos)
+for (cn in allContrasts) {
+  temp <- matrix(myCont[,cn], ncol = 1)
+  testRes <- DMLtest.multiFactor(myFit, Contrast = temp)
+  out[paste0(testRes$chr, "_", testRes$pos), paste0("FDR_", cn)] <- testRes$fdrs
+}
+noChrNum <- setdiff(colnames(out), c("chrNum"))
+rownames(out) <- paste0(out$chrom, '_', out$pos)
+write.table(out[,noChrNum], paste0(myPath, ".mod"), sep = '\t', quote = FALSE)

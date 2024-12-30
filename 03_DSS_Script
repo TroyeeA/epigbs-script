@@ -1,0 +1,124 @@
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install(c("DSS", "Rsamtools"), dependencies=TRUE)
+BiocManager::install("bsseq", dependencies=TRUE)
+BiocManager::install("Rsamtools", dependencies=TRUE)
+
+library("DSS", "bsseq")
+
+Step 1. Load in library. Read in text files and create an object of BSseq class, which is defined in bsseq Bioconductor package.
+
+library(DSS)
+require(bsseq)
+path = file.path(system.file(package="DSS"), "extdata")
+dat1.1 = read.table(file.path(path, "cond1_1.txt"), header=TRUE)
+dat1.2 = read.table(file.path(path, "cond1_2.txt"), header=TRUE)
+dat2.1 = read.table(file.path(path, "cond2_1.txt"), header=TRUE)
+dat2.2 = read.table(file.path(path, "cond2_2.txt"), header=TRUE)
+BSobj = makeBSseqData( list(dat1.1, dat1.2, dat2.1, dat2.2),
+     c("C1","C2", "N1", "N2") )[1:1000,]
+BSobj
+
+#-------------
+Step 2. Perform statistical test for DML by calling DMLtest function.
+#This function basically performs following steps:
+#(1) estimate mean methylation levels for all CpG site;
+#(2) estimate dispersions at each CpG sites;
+#(3) conduct Wald test.
+#For the first step, there’s an option for smoothing or not.
+#Because the methylation levels show strong spatial correlations,
+#smoothing can help obtain better estimates of mean methylation when
+#the CpG sites are dense in the data (such as from the whole-genome BS-seq).
+#However for data with sparse CpG, such as from RRBS or hydroxyl-methylation,
+#smoothing is not recommended.
+
+#To perform DML test without smoothing, do:
+
+        dmlTest = DMLtest(BSobj, group1=c("C1", "C2"), group2=c("N1", "N2"))
+        head(dmlTest)
+
+#To perform statistical test for DML with smoothing, do:
+
+        dmlTest.sm = DMLtest(BSobj, group1=c("C1", "C2"), group2=c("N1", "N2"),
+                     smoothing=TRUE)
+#--------------------------------
+Step 3. With the test results, one can call DML by using callDML function.
+The results DMLs are sorted by the significance.
+
+       dmls = callDML(dmlTest, p.threshold=0.001)
+               head(dmls)
+
+ ##       chr     pos        mu1       mu2       diff    diff.se      stat
+## 450 chr18 3976129 0.01027497 0.9390339 -0.9287590 0.06544340 -14.19179
+## 451 chr18 3976138 0.01027497 0.9390339 -0.9287590 0.06544340 -14.19179
+## 638 chr18 4431501 0.01331553 0.9430566 -0.9297411 0.09273779 -10.02548
+
+##            phi1       phi2         pval          fdr postprob.overThreshold
+## 450 0.052591567 0.02428826 1.029974e-45 2.499403e-43                      1
+## 451 0.052591567 0.02428826 1.029974e-45 2.499403e-43                      1
+## 638 0.053172411 0.07746835 1.177826e-23 1.429096e-21                      1
+
+By default, the test is based on the null hypothesis that the difference in methylation levels is 0.
+Alternatively, users can specify a threshold for difference.
+For example, to detect loci with difference greater than 0.1, do:
+
+               dmls2 = callDML(dmlTest, delta=0.1, p.threshold=0.001)
+               head(dmls2)
+
+##       chr     pos        mu1       mu2       diff    diff.se      stat
+## 450 chr18 3976129 0.01027497 0.9390339 -0.9287590 0.06544340 -14.19179
+## 451 chr18 3976138 0.01027497 0.9390339 -0.9287590 0.06544340 -14.19179
+## 638 chr18 4431501 0.01331553 0.9430566 -0.9297411 0.09273779 -10.02548
+##            phi1       phi2         pval          fdr postprob.overThreshold
+## 450 0.052591567 0.02428826 1.029974e-45 2.499403e-43                      1
+## 451 0.052591567 0.02428826 1.029974e-45 2.499403e-43                      1
+## 638 0.053172411 0.07746835 1.177826e-23 1.429096e-21                      1
+
+When delta is specified, the function will compute the posterior probability that the difference of the means is greater than delta.
+So technically speaking, the threshold for p-value here actually refers to the threshold for 1-posterior probability, or the local FDR.
+Here we use the same parameter name for the sake of the consistence of function syntax.
+
+#----------------------------
+Step 4. DMR detection is also Based on the DML test results, by calling callDMR function.
+Regions with many statistically significant CpG sites are identified as DMRs.
+Some restrictions are provided by users, including the minimum length, minimum number of CpG sites, percentage of CpG site being significant in the region, etc.
+There are some post hoc procedures to merge nearby DMRs into longer ones.
+
+                dmrs = callDMR(dmlTest, p.threshold=0.01)
+                head(dmrs)
+
+##      chr   start     end length nCG meanMethy1 meanMethy2 diff.Methy
+## 27 chr18 4657576 4657639     64   4   0.506453   0.318348   0.188105
+##    areaStat
+## 27 14.34236
+
+Here the DMRs are sorted by areaStat, which is defined in bsseq as the sum of the test statistics of all CpG sites within the DMR.
+
+Similarly, users can specify a threshold for difference. For example, to detect regions with difference greater than 0.1, do:
+
+                dmrs2 = callDMR(dmlTest, delta=0.1, p.threshold=0.05)
+                head(dmrs2)
+
+##      chr   start     end length nCG meanMethy1 meanMethy2 diff.Methy
+## 31 chr18 4657576 4657639     64   4  0.5064530  0.3183480   0.188105
+## 19 chr18 4222533 4222608     76   4  0.7880276  0.3614195   0.426608
+##    areaStat
+## 31 14.34236
+## 19 12.91667
+
+Note that the distribution of test statistics (and p-values) depends on the differences in methylation levels and biological variations,
+ as well as technical factors such as coverage depth. It is very difficulty to select a natural and rigorous threshold for defining DMRs.
+ We recommend users try different thresholds in order to obtain satisfactory results.
+
+The DMRs can be visualized using showOneDMR function, This function provides more information than the plotRegion function in bsseq.
+It plots the methylation percentages as well as the coverage depths at each CpG sites, instead of just the smoothed curve.
+So the coverage depth information will be available in the figure.
+
+To use the function, do
+
+               showOneDMR(dmrs[1,], BSobj)
+
+The result figure looks like the following. Note that the figure below is not generated from the above example.
+The example data are from RRBS experiment so the DMRs are much shorter.

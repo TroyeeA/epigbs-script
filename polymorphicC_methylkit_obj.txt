@@ -1,0 +1,52 @@
+HOW to get rid of #monomorphic cytosine from methyl kit dataset?
+----------------
+
+The unite file made with methyl kit is stored in folder.
+Step 1: start by reading the united methylkit file with all sample
+
+united<-readMethylDB("/home/tanupoma/pop-test/FiltCG/methylBase_9a0e1be2d4bb.txt.bgz")
+
+
+Step 2: Also make dataframe with the meth.obj so you can edit and work
+
+dataCG<-read.delim(getDBPath(united),header = FALSE, stringsAsFactors = FALSE, skip=13)
+
+Step 3:  Covert methyl kit obj file info to percentage 
+  
+c<- percMethylation(unitedCG, rowids = FALSE)
+
+Step 4: Get the number of monomorphic loci for 100% methylation (mC):
+monomorphic_mC <- which(rowSums(c[,] >= 95) >= round(ncol(c[,])*0.95,0))
+#690
+
+#monomorphic_mC <- which(rowSums(c) >= 95) >= round(ncol(c)*0.95,0)
+
+Get the number of monomorphic loci for 0% methylation (C):
+monomorphic_unmC <- which(rowSums(c[,] <= 5) >= round(ncol(c[,])*0.95,0))
+
+#monomorphic_unmC <- which(rowSums(c) <= 5) >= round(ncol(c)*0.95,0) #it doesn't work as it returns true/false
+
+length(monomorphic_unmC) #10647
+
+Step 5: # Select polymorphic loci
+monomorphicLoci <- c(monomorphic_unmC, monomorphic_mC)
+
+length(monomorphicLoci) #11337
+
+lociToKeep <- setdiff(rownames(dataCG), monomorphicLoci) #using dataCG for same rows
+
+length(lociToKeep)
+
+Step6: make a vector to pass through and filter meth obj.
+
+positions<-1:length(lociToKeep)
+
+
+subsetCG<-select(united,positions)
+
+#####################################################################################################
+
+##do all the analysis for insect and artificial unite object separately for using it for calculating  DMC
+
+united<-readMethylDB("/home/tanupoma/poplar/analysis_pop_final/italy/con-insect/FiltCG/methylBase_a31610a888b.txt.bgz")
+
